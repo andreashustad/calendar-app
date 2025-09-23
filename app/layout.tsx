@@ -1,16 +1,14 @@
-import "./globals.css";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 
 export const metadata: Metadata = {
   title: "Calendar Overlay",
-  description: "Lokal free/busy - Google + Microsoft",
-  viewport: "width=device-width, initial-scale=1"
+  description: "Local free/busy - Google + Microsoft",
+  manifest: "/manifest.webmanifest" // optional but recommended
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <html lang="no">
-      <body>{children}</body>
-    </html>
-  );
-}
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) { /* ... */ }

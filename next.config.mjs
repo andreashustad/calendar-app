@@ -1,18 +1,34 @@
 /** @type {import('next').NextConfig} */
+const isProd = process.env.NODE_ENV === "production";
+
 const nextConfig = {
-  // Viktig: ingen server-side proxies, kun statiske headers.
+  // Add a simple redirect so hitting "/" works during dev/prod
+  async redirects() {
+    return [
+      { source: "/", destination: "/kalender", permanent: false }
+    ];
+  },
+
   async headers() {
-    // Stramme sikkerhets-/privacy-headers for /kalender-ruten:
+    // In development, DO NOT set CSP/strict headers.
+    // Next's dev runtime and HMR often require eval/ws and will white-screen if blocked.
+    if (!isProd) {
+      return [];
+    }
+
+    // ---- Production-only security/privacy headers for /kalender ----
+    // Keep this tight. We intentionally avoid 'unsafe-eval' in prod.
     const csp = [
       "default-src 'self'",
-      // NB: Next.js injiserer noe inline-script. Start med 'unsafe-inline' for stabilitet,
-      // fjern hvis du verifiserer at det fungerer uten i din versjon.
+      // Keep 'unsafe-inline' only if your current Next build requires it.
+      // Try removing it once everything is stable.
       "script-src 'self' https://accounts.google.com 'unsafe-inline'",
       "connect-src 'self' https://www.googleapis.com https://graph.microsoft.com https://login.microsoftonline.com https://accounts.google.com",
       "img-src 'self' data:",
       "style-src 'self' 'unsafe-inline'",
       "frame-src https://accounts.google.com https://login.microsoftonline.com",
-      "base-uri 'none'; form-action 'none'"
+      "base-uri 'none'",
+      "form-action 'none'"
     ].join("; ");
 
     const common = [
@@ -27,18 +43,17 @@ const nextConfig = {
 
     return [
       {
-        // Gjelder kun kalender-ruten (isolert fra resten av siden)
+        // HTML entry for the /kalender route
         source: "/kalender",
         headers: [
           ...common,
-          // HTML bør ikke caches
           { key: "Cache-Control", value: "no-store" },
-          // HSTS bør helst settes på apex-domene i prod. Legges her for testdomene.
+          // Prefer setting HSTS at apex in your real prod setup.
           { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" }
         ]
       },
       {
-        // Statiske assets under /kalender
+        // Static assets under /kalender
         source: "/kalender/:path*",
         headers: common
       }
