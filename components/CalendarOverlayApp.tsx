@@ -198,40 +198,38 @@ async function getMsToken(): Promise<string | null> {
 
   // Free/Busy fetchers (default)
   async function fetchGraphFreeBusy(day: string): Promise<Interval[]> {
-    const token = await getMsToken();
-    if (!token) return [];
-    const { startISO, endISO } = dayBoundsISO(day);
-    const body = {
-      schedules: ["me"],
-      startTime: { dateTime: startISO.slice(0, 19), timeZone: tz },
-      endTime: { dateTime: endISO.slice(0, 19), timeZone: tz },
-      availabilityViewInterval: 15
-    };
+  const token = await getMsToken();
+  if (!token) return [];
+  const { startISO, endISO } = dayBoundsISO(day);
 
-    while (true) {
-      const resp = await fetch("https://graph.microsoft.com/v1.0/me/calendar/getSchedule", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          Prefer: `outlook.timezone="${tz}"`
-        },
-        body: JSON.stringify(body)
-      });
-      if (resp.status === 429 || resp.status === 503) { await backoff(resp); continue; }
-      if (!resp.ok) throw new Error(`Graph getSchedule: ${resp.status}`);
-      const data = await resp.json();
-      const entry = (data.value && data.value[0]) || {};
-      const items = (entry.scheduleItems || []) as any[];
-      // scheduleItems: { start: {dateTime, timeZone}, end: {...}, busyType }
-      const blocks: Interval[] = items.map(i => ({
-        start: new Date(i.start.dateTime),
-        end: new Date(i.end.dateTime)
-      })).filter(i => i.end > i.start);
-      // Som fallback: availabilityView ("0"/"1") kan brukes, men scheduleItems er bedre.
-      return blocks;
+  let url = "https://graph.microsoft.com/v1.0/me/calendarView"
+    + `?startDateTime=${encodeURIComponent(startISO)}`
+    + `&endDateTime=${encodeURIComponent(endISO)}`
+    + `&$select=start,end,showAs,sensitivity`
+    + `&$orderby=start/dateTime`;
+
+  const blocks: Interval[] = [];
+  while (url) {
+    const resp = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}`, Prefer: `outlook.timezone="${tz}"` }
+    });
+    if (resp.status === 429 || resp.status === 503) { await backoff(resp); continue; }
+    if (!resp.ok) throw new Error(`Graph calendarView: ${resp.status}`);
+    const data = await resp.json();
+    for (const e of (data.value || [])) {
+      // Treat anything except explicit "free" as busy (busy | tentative | oof | workingElsewhere | unknown)
+      const showAs = (e.showAs || "").toLowerCase();
+      if (showAs !== "free") {
+        const start = e.start?.dateTime ? new Date(e.start.dateTime) : new Date(e.start);
+        const end   = e.end?.dateTime   ? new Date(e.end.dateTime)   : new Date(e.end);
+        if (end > start) blocks.push({ start, end });
+      }
     }
+    url = data["@odata.nextLink"] || null;
   }
+  return blocks;
+}
+
 
   async function fetchGoogleFreeBusy(day: string): Promise<Interval[]> {
     if (!googleTokenRef.current) return [];
