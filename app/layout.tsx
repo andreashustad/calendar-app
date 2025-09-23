@@ -1,9 +1,10 @@
+import "./globals.css";
 import type { Metadata, Viewport } from "next";
 
 export const metadata: Metadata = {
   title: "Calendar Overlay",
   description: "Local free/busy - Google + Microsoft",
-  manifest: "/manifest.webmanifest" // optional but recommended
+  manifest: "/manifest.webmanifest"
 };
 
 export const viewport: Viewport = {
@@ -11,4 +12,16 @@ export const viewport: Viewport = {
   initialScale: 1
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) { /* ... */ }
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="en">
+      <body className="bg-gray-50 text-gray-900">
+        {children}
+      </body>
+    </html>
+  );
+}

@@ -74,40 +74,60 @@ export default function CalendarOverlayApp() {
 
   // Last MSAL fra pakke (self-host) og Google GSI (må fra accounts.google.com)
   useEffect(() => {
-    const app = new PublicClientApplication({
-      auth: { clientId: MSAL_CLIENT_ID, authority: `https://login.microsoftonline.com/${MSAL_TENANT}` },
-      cache: { cacheLocation: "sessionStorage", storeAuthStateInCookie: false },
-      system: { loggerOptions: { piiLoggingEnabled: false, loggerCallback: () => {} } }
-    });
+  // MSAL v3: you MUST call initialize() before any other MSAL API.
+  const app = new PublicClientApplication({
+    auth: {
+      clientId: MSAL_CLIENT_ID,
+      authority: `https://login.microsoftonline.com/${MSAL_TENANT}`
+    },
+    cache: { cacheLocation: "sessionStorage", storeAuthStateInCookie: false },
+    system: { loggerOptions: { piiLoggingEnabled: false, loggerCallback: () => {} } }
+  });
+
+  (async () => {
+    await app.initialize();                 // ✅ required
     setMsalApp(app);
 
-    // Google GSI
-    const script = document.createElement("script");
-    script.src = "https://accounts.google.com/gsi/client";
-    script.async = true;
-    script.onload = () => setGoogleReady(true);
-    script.onerror = () => console.error("Kunne ikke laste Google GSI");
-    document.head.appendChild(script);
+    // If a session already exists this tab, restore it
+    const existing = app.getActiveAccount() || app.getAllAccounts()[0] || null;
+    if (existing) {
+      app.setActiveAccount(existing);
+      setMsAccount(existing);
+    }
+  })();
 
-    return () => {
-      document.head.removeChild(script);
-    };
-  }, []);
+  // Google GSI script (must load from accounts.google.com)
+  const script = document.createElement("script");
+  script.src = "https://accounts.google.com/gsi/client";
+  script.async = true;
+  script.onload = () => setGoogleReady(true);
+  script.onerror = () => console.error("Failed to load Google GSI");
+  document.head.appendChild(script);
+
+  return () => {
+    document.head.removeChild(script);
+  };
+}, []);
+
 
   // MS sign-in
   async function connectMicrosoft() {
-    if (!msalApp) return;
-    setErr(null);
-    try {
-      const res = await msalApp.loginPopup({ scopes: MSAL_SCOPES });
-      if (res.account) {
-        msalApp.setActiveAccount(res.account);
-        setMsAccount(res.account);
-      }
-    } catch (e: any) {
-      setErr(`MSAL login feilet: ${e?.message ?? e}`);
+  if (!msalApp) return;
+  setErr(null);
+  try {
+    // Idempotent; safe to call even if already initialized
+    await msalApp.initialize();
+
+    const res = await msalApp.loginPopup({ scopes: MSAL_SCOPES });
+    if (res.account) {
+      msalApp.setActiveAccount(res.account);
+      setMsAccount(res.account);
     }
+  } catch (e: any) {
+    setErr(`MSAL login failed: ${e?.errorMessage || e?.message || String(e)}`);
   }
+}
+
 
   // Google sign-in (access token i minne)
   async function connectGoogle() {
@@ -150,18 +170,31 @@ export default function CalendarOverlayApp() {
   }
 
   // Token for Graph
-  async function getMsToken(): Promise<string | null> {
-    if (!msalApp) return null;
-    const account = msalApp.getActiveAccount();
-    if (!account) return null;
-    try {
-      const res = await msalApp.acquireTokenSilent({ scopes: MSAL_SCOPES });
-      return res.accessToken;
-    } catch {
-      const res = await msalApp.acquireTokenPopup({ scopes: MSAL_SCOPES });
-      return res.accessToken;
+async function getMsToken(): Promise<string | null> {
+  if (!msalApp) return null;
+  await msalApp.initialize(); // safe if already initialized
+
+  // Use active account or restore first available
+  let account = msalApp.getActiveAccount();
+  if (!account) {
+    const all = msalApp.getAllAccounts();
+    if (all.length) {
+      account = all[0];
+      msalApp.setActiveAccount(account);
+      setMsAccount(account);
     }
   }
+  if (!account) return null;
+
+  try {
+    const res = await msalApp.acquireTokenSilent({ scopes: MSAL_SCOPES, account });
+    return res.accessToken;
+  } catch {
+    const res = await msalApp.acquireTokenPopup({ scopes: MSAL_SCOPES });
+    return res.accessToken;
+  }
+}
+
 
   // Free/Busy fetchers (default)
   async function fetchGraphFreeBusy(day: string): Promise<Interval[]> {
