@@ -518,11 +518,15 @@ return (
         <div className="flex items-center gap-2">
           {/* Theme Toggle Button */}
           <button
-            onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
-            className="px-3 py-2 rounded-lg border bg-white dark:bg-gray-700 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+            onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+            className="px-3 py-2 rounded-lg border bg-white dark:bg-gray-700 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors flex items-center gap-2"
             title="Toggle Dark Mode"
+            aria-label={theme === "light" ? "Aktiver mørk modus" : "Aktiver lys modus"}
           >
-            {theme === 'light' ? <Moon /> : <Sun />}
+            {theme === "light" ? <Moon /> : <Sun />}
+            <span className="text-sm font-medium">
+              {theme === "light" ? "Dark mode" : "Light mode"}
+            </span>
           </button>
           
           <button
