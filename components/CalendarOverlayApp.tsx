@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { PublicClientApplication, type AccountInfo } from "@azure/msal-browser";
 import { backoff } from "../lib/backoff";
-import { localTZ, isoDate, dayBoundsISO, weekBoundsISO } from "../lib/dates";
+import { localTZ, isoDate, dayBoundsISO, weekBoundsISO, getISOWeek } from "../lib/dates";
 import { Interval, invertBusyToFree, mergeIntervals } from "../lib/freebusy";
 
 /**
@@ -43,6 +43,8 @@ export default function CalendarOverlayApp() {
   const [minSlot, setMinSlot] = useState(30);
   const [detailsMode, setDetailsMode] = useState(false); // default: free/busy only
   const [view, setView] = useState<"day" | "week">("day");
+
+  const weekNumber = useMemo(() => getISOWeek(new Date(date)), [date]);
 
   // Auth state
   const tz = useMemo(localTZ, []);
@@ -439,14 +441,51 @@ export default function CalendarOverlayApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date, detailsMode, msAccount, googleConnected, view]);
 
-  // Derived: free slots
+  // Derived: free slots (returns Interval[] for day view, Map<string, Interval[]> for week view)
   const freeSlots = useMemo(() => {
-    const day = new Date(`${date}T00:00:00`);
     const merged = mergeIntervals(
       busy.map((b: BusyBlock) => ({ start: b.start, end: b.end }))
     );
-    return invertBusyToFree(merged, day, workStart, workEnd, minSlot);
-  }, [busy, date, workStart, workEnd, minSlot]);
+
+    if (view === 'day') {
+      const day = new Date(`${date}T00:00:00`);
+      return invertBusyToFree(merged, day, workStart, workEnd, minSlot);
+    }
+    
+    // For week view
+    const weeklySlots = new Map<string, Interval[]>();
+    const startOfWeek = new Date(date);
+    const dayOfWeek = startOfWeek.getDay();
+    const diff = startOfWeek.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+    startOfWeek.setDate(diff);
+
+    for (let i = 0; i < 7; i++) {
+      const currentDay = new Date(startOfWeek);
+      currentDay.setDate(startOfWeek.getDate() + i);
+      const dailyBusy = merged.filter(b => 
+        b.start.getDate() === currentDay.getDate() &&
+        b.start.getMonth() === currentDay.getMonth()
+      );
+      const dailyFree = invertBusyToFree(dailyBusy, currentDay, workStart, workEnd, minSlot);
+      weeklySlots.set(isoDate(currentDay), dailyFree);
+    }
+    return weeklySlots;
+
+  }, [busy, date, workStart, workEnd, minSlot, view]);
+
+  function handlePrev() {
+    const currentDate = new Date(date);
+    const increment = view === 'week' ? 7 : 1;
+    currentDate.setDate(currentDate.getDate() - increment);
+    setDate(isoDate(currentDate));
+  }
+
+  function handleNext() {
+    const currentDate = new Date(date);
+    const increment = view === 'week' ? 7 : 1;
+    currentDate.setDate(currentDate.getDate() + increment);
+    setDate(isoDate(currentDate));
+  }
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
@@ -486,36 +525,55 @@ export default function CalendarOverlayApp() {
 
       <section className="bg-white rounded-2xl shadow p-4 space-y-4">
         <div className="flex flex-wrap items-center gap-3">
-          <label className="text-sm">
-            Dato:
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="ml-2 border rounded px-2 py-1"
-            />
-          </label>
 
-          {/* New view selector buttons */}
-          <div className="flex items-center gap-2 ml-4">
+          {/* Date controls with navigation arrows */}
+          <div className="flex items-center gap-1">
             <button
-              onClick={() => setView("day")}
-              className={`px-3 py-1 rounded-lg border ${
-                view === "day" ? "bg-gray-200" : "bg-white"
-              }`}
+              onClick={handlePrev}
+              className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-100"
+              title={view === 'day' ? 'Forrige dag' : 'Forrige uke'}
             >
-              Day
+              &lt;
             </button>
+            <label className="text-sm">
+              Dato:
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="ml-2 border rounded px-2 py-1"
+              />
+            </label>
             <button
-              onClick={() => setView("week")}
-              className={`px-3 py-1 rounded-lg border ${
-                view === "week" ? "bg-gray-200" : "bg-white"
-              }`}
+              onClick={handleNext}
+              className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-100"
+              title={view === 'day' ? 'Neste dag' : 'Neste uke'}
             >
-              Week
+              &gt;
             </button>
           </div>
 
+          {/* View selector with week number */}
+          <div className="flex items-center gap-2 ml-4">
+            <button
+              onClick={() => setView("day")}
+              className={`px-3 py-1 rounded-lg border text-sm ${
+                view === "day" ? "bg-gray-200 font-semibold" : "bg-white"
+              }`}
+            >
+              Dag
+            </button>
+            <button
+              onClick={() => setView("week")}
+              className={`px-3 py-1 rounded-lg border text-sm ${
+                view === "week" ? "bg-gray-200 font-semibold" : "bg-white"
+              }`}
+            >
+              Uke {view === 'week' && <span className="font-bold ml-1">{weekNumber}</span>}
+            </button>
+          </div>
+
+          {/* Rest of the controls: Arbeidstid, Min. hull, etc. */}
           <label className="text-sm">
             Arbeidstid:
             <input
@@ -563,24 +621,55 @@ export default function CalendarOverlayApp() {
         {loading && <p className="text-sm text-gray-500">Laster …</p>}
 
         <div className="grid md:grid-cols-3 gap-4">
-          <div className="md:col-span-2">
+<div className="md:col-span-2">
             <h2 className="font-medium mb-2">Ledige hull</h2>
-            {freeSlots.length === 0 ? (
-              <p className="text-sm text-gray-500">Ingen ledige hull innenfor arbeidstid.</p>
-            ) : (
-              <ul className="space-y-2">
-                {freeSlots.map((s, i) => (
-                  <li key={i} className="p-3 rounded-xl border bg-emerald-50">
-                    <div className="text-sm">
-                      {s.start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} –{" "}
-                      {s.end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    </div>
-                    <div className="text-xs text-gray-600">
-                      {(s.end.getTime() - s.start.getTime()) / 60000} min
-                    </div>
-                  </li>
+            {view === 'day' && (
+              (freeSlots as Interval[]).length === 0 ? (
+                <p className="text-sm text-gray-500">Ingen ledige hull innenfor arbeidstid.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {(freeSlots as Interval[]).map((s, i) => (
+                    <li key={i} className="p-3 rounded-xl border bg-emerald-50">
+                      <div className="text-sm">
+                        {s.start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} –{" "}
+                        {s.end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      </div>
+                      <div className="text-xs text-gray-600">
+                        {(s.end.getTime() - s.start.getTime()) / 60000} min
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )
+            )}
+
+            {view === 'week' && (
+              <div className="space-y-4">
+                {Array.from((freeSlots as Map<string, Interval[]>).entries()).map(([dayStr, slots]) => (
+                  <div key={dayStr}>
+                    <h3 className="font-medium text-sm text-gray-800 mb-1 border-b pb-1">
+                      {new Date(dayStr).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}
+                    </h3>
+                    {slots.length === 0 ? (
+                      <p className="text-sm text-gray-500 px-3 py-2">Ingen ledige hull.</p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {slots.map((s, i) => (
+                           <li key={i} className="p-3 rounded-xl border bg-emerald-50">
+                            <div className="text-sm">
+                              {s.start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} –{" "}
+                              {s.end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                            </div>
+                            <div className="text-xs text-gray-600">
+                              {(s.end.getTime() - s.start.getTime()) / 60000} min
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 ))}
-              </ul>
+              </div>
             )}
           </div>
 
