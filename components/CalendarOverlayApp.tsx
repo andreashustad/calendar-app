@@ -508,15 +508,18 @@ export default function CalendarOverlayApp() {
     setDate(isoDate(currentDate));
   }
 
-  return (
+return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold">Samlet kalender (lokal, free/busy som standard)</h1>
+        {/* FIX: Added dark mode text color to the title */}
+        <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+          Samlet kalender (lokal, free/busy som standard)
+        </h1>
         <div className="flex items-center gap-2">
           {/* Theme Toggle Button */}
           <button
             onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
-            className="px-3 py-2 rounded-lg border bg-white dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700"
+            className="px-3 py-2 rounded-lg border bg-white dark:bg-gray-700 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
             title="Toggle Dark Mode"
           >
             {theme === 'light' ? <Moon /> : <Sun />}
@@ -525,7 +528,7 @@ export default function CalendarOverlayApp() {
           <button
             onClick={connectGoogle}
             disabled={!googleReady}
-            className="px-3 py-2 rounded-lg border bg-white dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-60"
+            className="px-3 py-2 rounded-lg border bg-white dark:bg-gray-700 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600 disabled:opacity-60 transition-colors"
             title="Koble til Google (read-only)"
           >
             {googleConnected ? "Google: tilkoblet" : googleReady ? "Koble til Google" : "Laster Google…"}
@@ -533,19 +536,19 @@ export default function CalendarOverlayApp() {
 
           <button
             onClick={connectMicrosoft}
-            className="px-3 py-2 rounded-lg border bg-white dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700"
+            className="px-3 py-2 rounded-lg border bg-white dark:bg-gray-700 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
             title="Koble til Microsoft (read-only)"
           >
             {msAccount ? "Microsoft: tilkoblet" : "Koble til Microsoft"}
           </button>
 
-          <button onClick={refresh} className="px-3 py-2 rounded-lg border bg-white dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700">
+          <button onClick={refresh} className="px-3 py-2 rounded-lg border bg-white dark:bg-gray-700 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors">
             Oppdater
           </button>
 
           <button
             onClick={panic}
-            className="px-3 py-2 rounded-lg border text-red-700 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 dark:text-red-400 dark:border-red-800/50"
+            className="px-3 py-2 rounded-lg border text-red-700 bg-red-50 hover:bg-red-100 dark:bg-red-900/40 dark:hover:bg-red-900/60 dark:text-red-300 dark:border-red-700/50 transition-colors"
             title="Logg ut alle, opphev tokens og tøm alt"
           >
             PANIC (tøm alt)
@@ -553,12 +556,13 @@ export default function CalendarOverlayApp() {
         </div>
       </header>
 
-      <section className="bg-white dark:bg-gray-800/50 dark:border dark:border-gray-700/50 rounded-2xl shadow p-4 space-y-4">
+      {/* FIX: Replaced semi-transparent background with a solid one */}
+      <section className="bg-white dark:bg-gray-800 rounded-2xl shadow p-4 space-y-4 border dark:border-gray-700 transition-colors">
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-1">
             <button
               onClick={handlePrev}
-              className="px-2 py-1 rounded-lg border bg-white dark:bg-gray-700 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600"
+              className="px-2 py-1 rounded-lg border bg-white dark:bg-gray-700 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
               title={view === 'day' ? 'Forrige dag' : 'Forrige uke'}
             >
               &lt;
@@ -574,7 +578,7 @@ export default function CalendarOverlayApp() {
             </label>
             <button
               onClick={handleNext}
-              className="px-2 py-1 rounded-lg border bg-white dark:bg-gray-700 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600"
+              className="px-2 py-1 rounded-lg border bg-white dark:bg-gray-700 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
               title={view === 'day' ? 'Neste dag' : 'Neste uke'}
             >
               &gt;
@@ -584,7 +588,7 @@ export default function CalendarOverlayApp() {
           <div className="flex items-center gap-2 ml-4">
             <button
               onClick={() => setView("day")}
-              className={`px-3 py-1 rounded-lg border text-sm ${
+              className={`px-3 py-1 rounded-lg border text-sm transition-colors ${
                 view === "day" ? "bg-gray-200 dark:bg-gray-600 font-semibold" : "bg-white dark:bg-gray-700 dark:border-gray-600"
               }`}
             >
@@ -592,7 +596,7 @@ export default function CalendarOverlayApp() {
             </button>
             <button
               onClick={() => setView("week")}
-              className={`px-3 py-1 rounded-lg border text-sm ${
+              className={`px-3 py-1 rounded-lg border text-sm transition-colors ${
                 view === "week" ? "bg-gray-200 dark:bg-gray-600 font-semibold" : "bg-white dark:bg-gray-700 dark:border-gray-600"
               }`}
             >
@@ -724,7 +728,7 @@ export default function CalendarOverlayApp() {
                     minute: "2-digit",
                   })} – ${e.end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
                   return (
-                    <li key={i} className="p-3 rounded-xl border bg-gray-50 dark:bg-gray-800 dark:border-gray-700">
+                    <li key={i} className="p-3 rounded-xl border bg-gray-50 dark:bg-gray-700 dark:border-gray-600">
                       <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
                         {e.source === "google" ? "Google" : "Microsoft"}
                       </div>
