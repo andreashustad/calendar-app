@@ -5,6 +5,7 @@ import { PublicClientApplication, type AccountInfo } from "@azure/msal-browser";
 import { backoff } from "../lib/backoff";
 import { localTZ, isoDate, dayBoundsISO, weekBoundsISO, getISOWeek } from "../lib/dates";
 import { Interval, invertBusyToFree, mergeIntervals } from "../lib/freebusy";
+import { Sun, Moon } from "./components/Icons";
 
 /**
  * ROBUST, CLIENT-ONLY CALENDAR OVERLAY
@@ -43,6 +44,7 @@ export default function CalendarOverlayApp() {
   const [minSlot, setMinSlot] = useState(30);
   const [detailsMode, setDetailsMode] = useState(false); // default: free/busy only
   const [view, setView] = useState<"day" | "week">("day");
+  const [theme, setTheme] = useState("light");
 
   const weekNumber = useMemo(() => getISOWeek(new Date(date)), [date]);
 
@@ -62,6 +64,25 @@ export default function CalendarOverlayApp() {
   const [events, setEvents] = useState<EventItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Effect to handle theme changes and persistence
+  useEffect(() => {
+    // Check for saved theme in localStorage or user's OS preference
+    const savedTheme = localStorage.getItem("theme");
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const initialTheme = savedTheme || (prefersDark ? "dark" : "light");
+    setTheme(initialTheme);
+  }, []);
+
+  useEffect(() => {
+    if (theme === "dark") {
+      document.documentElement.classList.add("dark");
+      localStorage.setItem("theme", "dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+      localStorage.setItem("theme", "light");
+    }
+  }, [theme]);
 
   // Inactivity -> auto-logout after 45 min
   useEffect(() => {
@@ -492,10 +513,19 @@ export default function CalendarOverlayApp() {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">Samlet kalender (lokal, free/busy som standard)</h1>
         <div className="flex items-center gap-2">
+          {/* Theme Toggle Button */}
+          <button
+            onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+            className="px-3 py-2 rounded-lg border bg-white dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700"
+            title="Toggle Dark Mode"
+          >
+            {theme === 'light' ? <Moon /> : <Sun />}
+          </button>
+          
           <button
             onClick={connectGoogle}
             disabled={!googleReady}
-            className="px-3 py-2 rounded-lg border bg-white hover:bg-gray-50 disabled:opacity-60"
+            className="px-3 py-2 rounded-lg border bg-white dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-60"
             title="Koble til Google (read-only)"
           >
             {googleConnected ? "Google: tilkoblet" : googleReady ? "Koble til Google" : "Laster Google…"}
@@ -503,19 +533,19 @@ export default function CalendarOverlayApp() {
 
           <button
             onClick={connectMicrosoft}
-            className="px-3 py-2 rounded-lg border bg-white hover:bg-gray-50"
+            className="px-3 py-2 rounded-lg border bg-white dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700"
             title="Koble til Microsoft (read-only)"
           >
             {msAccount ? "Microsoft: tilkoblet" : "Koble til Microsoft"}
           </button>
 
-          <button onClick={refresh} className="px-3 py-2 rounded-lg border bg-white hover:bg-gray-50">
+          <button onClick={refresh} className="px-3 py-2 rounded-lg border bg-white dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700">
             Oppdater
           </button>
 
           <button
             onClick={panic}
-            className="px-3 py-2 rounded-lg border text-red-700 bg-red-50 hover:bg-red-100"
+            className="px-3 py-2 rounded-lg border text-red-700 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 dark:text-red-400 dark:border-red-800/50"
             title="Logg ut alle, opphev tokens og tøm alt"
           >
             PANIC (tøm alt)
@@ -523,14 +553,12 @@ export default function CalendarOverlayApp() {
         </div>
       </header>
 
-      <section className="bg-white rounded-2xl shadow p-4 space-y-4">
+      <section className="bg-white dark:bg-gray-800/50 dark:border dark:border-gray-700/50 rounded-2xl shadow p-4 space-y-4">
         <div className="flex flex-wrap items-center gap-3">
-
-          {/* Date controls with navigation arrows */}
           <div className="flex items-center gap-1">
             <button
               onClick={handlePrev}
-              className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-100"
+              className="px-2 py-1 rounded-lg border bg-white dark:bg-gray-700 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600"
               title={view === 'day' ? 'Forrige dag' : 'Forrige uke'}
             >
               &lt;
@@ -541,24 +569,23 @@ export default function CalendarOverlayApp() {
                 type="date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
-                className="ml-2 border rounded px-2 py-1"
+                className="ml-2 border rounded px-2 py-1 bg-white dark:bg-gray-700 dark:border-gray-600"
               />
             </label>
             <button
               onClick={handleNext}
-              className="px-2 py-1 rounded-lg border bg-white hover:bg-gray-100"
+              className="px-2 py-1 rounded-lg border bg-white dark:bg-gray-700 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600"
               title={view === 'day' ? 'Neste dag' : 'Neste uke'}
             >
               &gt;
             </button>
           </div>
 
-          {/* View selector with week number */}
           <div className="flex items-center gap-2 ml-4">
             <button
               onClick={() => setView("day")}
               className={`px-3 py-1 rounded-lg border text-sm ${
-                view === "day" ? "bg-gray-200 font-semibold" : "bg-white"
+                view === "day" ? "bg-gray-200 dark:bg-gray-600 font-semibold" : "bg-white dark:bg-gray-700 dark:border-gray-600"
               }`}
             >
               Dag
@@ -566,14 +593,13 @@ export default function CalendarOverlayApp() {
             <button
               onClick={() => setView("week")}
               className={`px-3 py-1 rounded-lg border text-sm ${
-                view === "week" ? "bg-gray-200 font-semibold" : "bg-white"
+                view === "week" ? "bg-gray-200 dark:bg-gray-600 font-semibold" : "bg-white dark:bg-gray-700 dark:border-gray-600"
               }`}
             >
               Uke {view === 'week' && <span className="font-bold ml-1">{weekNumber}</span>}
             </button>
           </div>
 
-          {/* Rest of the controls: Arbeidstid, Min. hull, etc. */}
           <label className="text-sm">
             Arbeidstid:
             <input
@@ -582,7 +608,7 @@ export default function CalendarOverlayApp() {
               max={23}
               value={workStart}
               onChange={(e) => setWorkStart(parseInt(e.target.value || "8", 10))}
-              className="ml-2 w-16 border rounded px-2 py-1"
+              className="ml-2 w-16 border rounded px-2 py-1 bg-white dark:bg-gray-700 dark:border-gray-600"
             />
             <span className="mx-1">–</span>
             <input
@@ -591,7 +617,7 @@ export default function CalendarOverlayApp() {
               max={23}
               value={workEnd}
               onChange={(e) => setWorkEnd(parseInt(e.target.value || "17", 10))}
-              className="w-16 border rounded px-2 py-1"
+              className="w-16 border rounded px-2 py-1 bg-white dark:bg-gray-700 dark:border-gray-600"
             />
           </label>
 
@@ -603,7 +629,7 @@ export default function CalendarOverlayApp() {
               max={240}
               value={minSlot}
               onChange={(e) => setMinSlot(parseInt(e.target.value || "30", 10))}
-              className="ml-2 w-20 border rounded px-2 py-1"
+              className="ml-2 w-20 border rounded px-2 py-1 bg-white dark:bg-gray-700 dark:border-gray-600"
             />
           </label>
 
@@ -612,29 +638,30 @@ export default function CalendarOverlayApp() {
               type="checkbox"
               checked={detailsMode}
               onChange={(e) => setDetailsMode(e.target.checked)}
+              className="dark:accent-sky-400"
             />
             Vis detaljer (opt‑in)
           </label>
         </div>
 
-        {err && <p className="text-sm text-red-600">Feil: {err}</p>}
-        {loading && <p className="text-sm text-gray-500">Laster …</p>}
+        {err && <p className="text-sm text-red-500 dark:text-red-400">Feil: {err}</p>}
+        {loading && <p className="text-sm text-gray-500 dark:text-gray-400">Laster …</p>}
 
         <div className="grid md:grid-cols-3 gap-4">
-<div className="md:col-span-2">
+          <div className="md:col-span-2">
             <h2 className="font-medium mb-2">Ledige hull</h2>
             {view === 'day' && (
               (freeSlots as Interval[]).length === 0 ? (
-                <p className="text-sm text-gray-500">Ingen ledige hull innenfor arbeidstid.</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Ingen ledige hull innenfor arbeidstid.</p>
               ) : (
                 <ul className="space-y-2">
                   {(freeSlots as Interval[]).map((s, i) => (
-                    <li key={i} className="p-3 rounded-xl border bg-emerald-50">
+                    <li key={i} className="p-3 rounded-xl border bg-emerald-50 dark:bg-emerald-900/50 dark:border-emerald-800/50">
                       <div className="text-sm">
                         {s.start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} –{" "}
                         {s.end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                       </div>
-                      <div className="text-xs text-gray-600">
+                      <div className="text-xs text-gray-600 dark:text-gray-400">
                         {(s.end.getTime() - s.start.getTime()) / 60000} min
                       </div>
                     </li>
@@ -647,20 +674,20 @@ export default function CalendarOverlayApp() {
               <div className="space-y-4">
                 {Array.from((freeSlots as Map<string, Interval[]>).entries()).map(([dayStr, slots]) => (
                   <div key={dayStr}>
-                    <h3 className="font-medium text-sm text-gray-800 mb-1 border-b pb-1">
+                    <h3 className="font-medium text-sm text-gray-800 dark:text-gray-300 mb-1 border-b pb-1 dark:border-gray-700">
                       {new Date(dayStr).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}
                     </h3>
                     {slots.length === 0 ? (
-                      <p className="text-sm text-gray-500 px-3 py-2">Ingen ledige hull.</p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400 px-3 py-2">Ingen ledige hull.</p>
                     ) : (
                       <ul className="space-y-2">
                         {slots.map((s, i) => (
-                           <li key={i} className="p-3 rounded-xl border bg-emerald-50">
+                           <li key={i} className="p-3 rounded-xl border bg-emerald-50 dark:bg-emerald-900/50 dark:border-emerald-800/50">
                             <div className="text-sm">
                               {s.start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} –{" "}
                               {s.end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                             </div>
-                            <div className="text-xs text-gray-600">
+                            <div className="text-xs text-gray-600 dark:text-gray-400">
                               {(s.end.getTime() - s.start.getTime()) / 60000} min
                             </div>
                           </li>
@@ -679,14 +706,14 @@ export default function CalendarOverlayApp() {
             </h2>
 
             {!detailsMode ? (
-              <ul className="text-sm text-gray-700 space-y-1">
+              <ul className="text-sm text-gray-700 dark:text-gray-400 space-y-1">
                 <li>Google: free/busy</li>
                 <li>Microsoft: calendarView</li>
                 <li>Tidssone: {tz}</li>
                 <li>Ingen logger, ingen backend</li>
               </ul>
             ) : events.length === 0 ? (
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-gray-500 dark:text-gray-400">
                 Ingen hendelser å vise, eller ikke tilkoblet.
               </p>
             ) : (
@@ -697,12 +724,12 @@ export default function CalendarOverlayApp() {
                     minute: "2-digit",
                   })} – ${e.end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
                   return (
-                    <li key={i} className="p-3 rounded-xl border bg-gray-50">
-                      <div className="text-xs uppercase tracking-wide text-gray-500">
+                    <li key={i} className="p-3 rounded-xl border bg-gray-50 dark:bg-gray-800 dark:border-gray-700">
+                      <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
                         {e.source === "google" ? "Google" : "Microsoft"}
                       </div>
                       <div className="font-medium">{e.title ?? "(Privat)"}</div>
-                      <div className="text-sm text-gray-600">
+                      <div className="text-sm text-gray-600 dark:text-gray-400">
                         {range}
                         {e.location ? ` · ${e.location}` : ""}
                       </div>
@@ -714,7 +741,7 @@ export default function CalendarOverlayApp() {
           </aside>
         </div>
 
-        <div className="text-xs text-gray-500 border-t pt-3">
+        <div className="text-xs text-gray-500 dark:text-gray-400 border-t pt-3 dark:border-gray-700">
           <p>
             <strong>Personvern:</strong> Ingen hendelser sendes til andre enn Google/Microsoft.
             Ingen egen backend.
