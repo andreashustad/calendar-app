@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { PublicClientApplication, type AccountInfo } from "@azure/msal-browser";
 import { backoff } from "../lib/backoff";
-import { localTZ, isoDate, dayBoundsISO } from "../lib/dates";
+import { localTZ, isoDate, dayBoundsISO, weekBoundsISO } from "../lib/dates";
 import { Interval, invertBusyToFree, mergeIntervals } from "../lib/freebusy";
 
 /**
@@ -42,6 +42,7 @@ export default function CalendarOverlayApp() {
   const [workEnd, setWorkEnd] = useState(17);
   const [minSlot, setMinSlot] = useState(30);
   const [detailsMode, setDetailsMode] = useState(false); // default: free/busy only
+  const [view, setView] = useState<"day" | "week">("day");
 
   // Auth state
   const tz = useMemo(localTZ, []);
@@ -234,10 +235,9 @@ export default function CalendarOverlayApp() {
   // ---- Free/Busy fetchers (default) ----
 
   // Microsoft: derive busy from calendarView (robust across tenants)
-  async function fetchGraphFreeBusy(day: string): Promise<Interval[]> {
+  async function fetchGraphFreeBusy(startISO: string, endISO: string): Promise<Interval[]> {
     const token = await getMsToken();
     if (!token) return [];
-    const { startISO, endISO } = dayBoundsISO(day);
 
     let url =
       "https://graph.microsoft.com/v1.0/me/calendarView" +
@@ -272,9 +272,8 @@ export default function CalendarOverlayApp() {
   }
 
   // Google: freeBusy endpoint
-  async function fetchGoogleFreeBusy(day: string): Promise<Interval[]> {
+  async function fetchGoogleFreeBusy(startISO: string, endISO: string): Promise<Interval[]> {
     if (!googleTokenRef.current) return [];
-    const { startISO, endISO } = dayBoundsISO(day);
     const payload = {
       timeMin: startISO,
       timeMax: endISO,
@@ -401,7 +400,9 @@ export default function CalendarOverlayApp() {
     setLoading(true);
     setErr(null);
     try {
-      const tasks: Promise<any>[] = [fetchGraphFreeBusy(date), fetchGoogleFreeBusy(date)];
+      const { startISO, endISO } = view === 'day' ? dayBoundsISO(date) : weekBoundsISO(date);
+
+      const tasks: Promise<any>[] = [fetchGraphFreeBusy(startISO, endISO), fetchGoogleFreeBusy(startISO, endISO)];
       const [msBusy, gBusy] = await Promise.all(tasks);
 
       const busyBlocks: BusyBlock[] = [
@@ -494,6 +495,26 @@ export default function CalendarOverlayApp() {
               className="ml-2 border rounded px-2 py-1"
             />
           </label>
+
+          {/* New view selector buttons */}
+          <div className="flex items-center gap-2 ml-4">
+            <button
+              onClick={() => setView("day")}
+              className={`px-3 py-1 rounded-lg border ${
+                view === "day" ? "bg-gray-200" : "bg-white"
+              }`}
+            >
+              Day
+            </button>
+            <button
+              onClick={() => setView("week")}
+              className={`px-3 py-1 rounded-lg border ${
+                view === "week" ? "bg-gray-200" : "bg-white"
+              }`}
+            >
+              Week
+            </button>
+          </div>
 
           <label className="text-sm">
             Arbeidstid:
