@@ -437,7 +437,7 @@ export default function CalendarOverlayApp() {
   useEffect(() => {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [date, detailsMode, msAccount, googleConnected]);
+  }, [date, detailsMode, msAccount, googleConnected, view]);
 
   // Derived: free slots
   const freeSlots = useMemo(() => {
