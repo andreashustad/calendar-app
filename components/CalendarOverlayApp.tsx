@@ -5,7 +5,7 @@ import { PublicClientApplication, type AccountInfo } from "@azure/msal-browser";
 import { backoff } from "../lib/backoff";
 import { localTZ, isoDate, dayBoundsISO, weekBoundsISO, getISOWeek } from "../lib/dates";
 import { Interval, invertBusyToFree, mergeIntervals } from "../lib/freebusy";
-import { Sun, Moon } from "./components/Icons";
+import { Sun, Moon } from "./Icons"; 
 
 /**
  * ROBUST, CLIENT-ONLY CALENDAR OVERLAY
