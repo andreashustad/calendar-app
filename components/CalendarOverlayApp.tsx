@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PublicClientApplication, type AccountInfo } from "@azure/msal-browser";
 import { backoff } from "../lib/backoff";
 import { localTZ, isoDate, dayBoundsISO, weekBoundsISO, getISOWeek } from "../lib/dates";
@@ -36,6 +36,99 @@ type EventItem = {
   isPrivate?: boolean;
 };
 
+const DAY_INDICES = [0, 1, 2, 3, 4, 5, 6] as const;
+type DayIndex = (typeof DAY_INDICES)[number];
+
+type WorkHours = { start: number; end: number };
+type WorkHoursMap = Record<DayIndex, WorkHours>;
+
+const DEFAULT_WORK_HOURS_TEMPLATE: WorkHoursMap = {
+  0: { start: 0, end: 0 },
+  1: { start: 8, end: 17 },
+  2: { start: 8, end: 17 },
+  3: { start: 8, end: 17 },
+  4: { start: 8, end: 17 },
+  5: { start: 8, end: 17 },
+  6: { start: 0, end: 0 },
+};
+
+const DAY_ORDER: DayIndex[] = [1, 2, 3, 4, 5, 6, 0];
+const DAY_LABELS: Record<DayIndex, string> = {
+  0: "Søndag",
+  1: "Mandag",
+  2: "Tirsdag",
+  3: "Onsdag",
+  4: "Torsdag",
+  5: "Fredag",
+  6: "Lørdag",
+};
+
+const SAVED_VIEWS_STORAGE_KEY = "calendar_saved_views";
+const CUSTOM_HOURS_STORAGE_KEY = "calendar_custom_work_hours";
+const CUSTOM_HOURS_MODE_STORAGE_KEY = "calendar_use_custom_work_hours";
+
+type SavedView = {
+  id: string;
+  name: string;
+  date: string;
+  view: "day" | "week";
+  detailsMode: boolean;
+  minSlot: number;
+  workStart: number;
+  workEnd: number;
+  useCustomWorkHours: boolean;
+  customWorkHours: WorkHoursMap;
+};
+
+function clampHour(value: number): number {
+  return Math.max(0, Math.min(23, Math.round(value)));
+}
+
+function createDefaultCustomWorkHours(): WorkHoursMap {
+  const result = {} as WorkHoursMap;
+  DAY_INDICES.forEach((day) => {
+    const template = DEFAULT_WORK_HOURS_TEMPLATE[day];
+    result[day] = { start: template.start, end: template.end };
+  });
+  return result;
+}
+
+function normalizeWorkHours(source?: any): WorkHoursMap {
+  const normalized = createDefaultCustomWorkHours();
+  if (!source) return normalized;
+  DAY_INDICES.forEach((day) => {
+    const candidate = source?.[day] ?? source?.[String(day)];
+    if (!candidate) return;
+    const startNumber = Number((candidate as any).start);
+    const endNumber = Number((candidate as any).end);
+    const start = Number.isFinite(startNumber) ? clampHour(startNumber) : normalized[day].start;
+    const endRaw = Number.isFinite(endNumber) ? clampHour(endNumber) : normalized[day].end;
+    normalized[day] = { start, end: endRaw < start ? start : endRaw };
+  });
+  return normalized;
+}
+
+function createUniformWorkHours(start: number, end: number): WorkHoursMap {
+  const uniform = createDefaultCustomWorkHours();
+  const s = clampHour(start);
+  const eRaw = clampHour(end);
+  const e = eRaw < s ? s : eRaw;
+  DAY_INDICES.forEach((day) => {
+    uniform[day] = { start: s, end: e };
+  });
+  return uniform;
+}
+
+function cloneWorkHours(hours: WorkHoursMap): WorkHoursMap {
+  const clone = createDefaultCustomWorkHours();
+  DAY_INDICES.forEach((day) => {
+    const source = hours[day];
+    clone[day] = { start: source.start, end: source.end };
+  });
+  return clone;
+}
+
+
 export default function CalendarOverlayApp() {
   // UI state
   const [date, setDate] = useState(isoDate(new Date()));
@@ -45,6 +138,20 @@ export default function CalendarOverlayApp() {
   const [detailsMode, setDetailsMode] = useState(false); // default: free/busy only
   const [view, setView] = useState<"day" | "week">("day");
   const [theme, setTheme] = useState("light");
+  const [displayTimezone, setDisplayTimezone] = useState<string>("");
+  const [timezones, setTimezones] = useState<string[]>([]);
+  const [sourceColors, setSourceColors] = useState<Record<Source, string>>({
+    google: "#0ea5e9",
+    microsoft: "#6366f1",
+  });
+  const [showTimezoneHelper, setShowTimezoneHelper] = useState(false);
+    const [useCustomWorkHours, setUseCustomWorkHours] = useState(false);
+  const [customWorkHours, setCustomWorkHours] = useState<WorkHoursMap>(() =>
+    createDefaultCustomWorkHours()
+  );
+  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
+  const [selectedViewId, setSelectedViewId] = useState<string | null>(null);
+  const [newViewName, setNewViewName] = useState("");
 
   const weekNumber = useMemo(() => getISOWeek(new Date(date)), [date]);
 
@@ -65,6 +172,61 @@ export default function CalendarOverlayApp() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+    useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const storedHours = localStorage.getItem(CUSTOM_HOURS_STORAGE_KEY);
+      if (storedHours) {
+        setCustomWorkHours(normalizeWorkHours(JSON.parse(storedHours)));
+      }
+
+      const storedMode = localStorage.getItem(CUSTOM_HOURS_MODE_STORAGE_KEY);
+      if (storedMode) {
+        setUseCustomWorkHours(storedMode === "true");
+      }
+
+      const storedViews = localStorage.getItem(SAVED_VIEWS_STORAGE_KEY);
+      if (storedViews) {
+        const parsed = JSON.parse(storedViews);
+        if (Array.isArray(parsed)) {
+          const hydrated: SavedView[] = parsed.map((item: any, idx: number) => {
+            const id = typeof item?.id === "string" ? item.id : `view-${idx}-${Date.now()}`;
+            const name = typeof item?.name === "string" ? item.name : "Uten navn";
+            const storedDate = typeof item?.date === "string" ? item.date : isoDate(new Date());
+            const storedView = item?.view === "week" ? "week" : "day";
+            const storedDetails = Boolean(item?.detailsMode);
+            const storedMinSlot = Number.isFinite(Number(item?.minSlot))
+              ? Number(item.minSlot)
+              : 30;
+            const storedWorkStart = Number.isFinite(Number(item?.workStart))
+              ? Number(item.workStart)
+              : 8;
+            const storedWorkEnd = Number.isFinite(Number(item?.workEnd))
+              ? Number(item.workEnd)
+              : 17;
+            const storedCustomMode = Boolean(item?.useCustomWorkHours);
+            return {
+              id,
+              name,
+              date: storedDate,
+              view: storedView,
+              detailsMode: storedDetails,
+              minSlot: storedMinSlot,
+              workStart: storedWorkStart,
+              workEnd: storedWorkEnd,
+              useCustomWorkHours: storedCustomMode,
+              customWorkHours: normalizeWorkHours(item?.customWorkHours),
+            } satisfies SavedView;
+          });
+          setSavedViews(hydrated);
+        }
+      }
+    } catch (storageError) {
+      console.error("Kunne ikke laste lagrede innstillinger", storageError);
+    }
+  }, []);
+
+
   // Effect to handle theme changes and persistence
   useEffect(() => {
     // Check for saved theme in localStorage or user's OS preference
@@ -72,7 +234,18 @@ export default function CalendarOverlayApp() {
     const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     const initialTheme = savedTheme || (prefersDark ? "dark" : "light");
     setTheme(initialTheme);
-  }, []);
+   setDisplayTimezone(localStorage.getItem("displayTimezone") || tz);
+    try {
+      const stored = localStorage.getItem("sourceColors");
+      if (stored) {
+        const parsed = JSON.parse(stored) as Partial<Record<Source, string>>;
+        setSourceColors((prev) => ({ ...prev, ...parsed }));
+      }
+    } catch (error) {
+      console.warn("Kunne ikke lese lagrede farger", error);
+    }
+  }, [tz]);
+
 
   useEffect(() => {
     if (theme === "dark") {
@@ -83,6 +256,42 @@ export default function CalendarOverlayApp() {
       localStorage.setItem("theme", "light");
     }
   }, [theme]);
+
+    useEffect(() => {
+    if (displayTimezone) {
+      localStorage.setItem("displayTimezone", displayTimezone);
+    }
+  }, [displayTimezone]);
+
+  useEffect(() => {
+    localStorage.setItem("sourceColors", JSON.stringify(sourceColors));
+  }, [sourceColors]);
+
+  useEffect(() => {
+    try {
+      const supported =
+        typeof Intl.supportedValuesOf === "function"
+          ? (Intl.supportedValuesOf("timeZone") as string[])
+          : [];
+      if (supported.length) {
+        setTimezones(supported);
+      } else {
+        setTimezones([
+          "Europe/Oslo",
+          "Europe/London",
+          "UTC",
+          "America/New_York",
+          "America/Los_Angeles",
+          "Asia/Singapore",
+          "Asia/Tokyo",
+          "Australia/Sydney",
+        ]);
+      }
+    } catch (error) {
+      console.warn("Kunne ikke hente tidssoneliste", error);
+      setTimezones([tz, "UTC", "Europe/London", "America/New_York"]);
+    }
+  }, [tz]);
 
   // Inactivity -> auto-logout after 45 min
   useEffect(() => {
@@ -103,6 +312,36 @@ export default function CalendarOverlayApp() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+    useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(CUSTOM_HOURS_STORAGE_KEY, JSON.stringify(customWorkHours));
+    } catch (storageError) {
+      console.error("Kunne ikke lagre arbeidstid per dag", storageError);
+    }
+  }, [customWorkHours]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(
+        CUSTOM_HOURS_MODE_STORAGE_KEY,
+        useCustomWorkHours ? "true" : "false"
+      );
+    } catch (storageError) {
+      console.error("Kunne ikke lagre modus for arbeidstid", storageError);
+    }
+  }, [useCustomWorkHours]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(SAVED_VIEWS_STORAGE_KEY, JSON.stringify(savedViews));
+    } catch (storageError) {
+      console.error("Kunne ikke lagre lagrede visninger", storageError);
+    }
+  }, [savedViews]);
 
   // Initialize MSAL v3 and load Google GSI
   useEffect(() => {
@@ -470,7 +709,11 @@ export default function CalendarOverlayApp() {
 
     if (view === 'day') {
       const day = new Date(`${date}T00:00:00`);
-      return invertBusyToFree(merged, day, workStart, workEnd, minSlot);
+      const dayIndex = day.getDay() as DayIndex;
+      const hours = useCustomWorkHours
+        ? customWorkHours[dayIndex] ?? { start: workStart, end: workEnd }
+        : { start: workStart, end: workEnd };
+      return invertBusyToFree(merged, day, hours.start, hours.end, minSlot);
     }
     
     // For week view
@@ -483,16 +726,47 @@ export default function CalendarOverlayApp() {
     for (let i = 0; i < 7; i++) {
       const currentDay = new Date(startOfWeek);
       currentDay.setDate(startOfWeek.getDate() + i);
-      const dailyBusy = merged.filter(b => 
-        b.start.getDate() === currentDay.getDate() &&
-        b.start.getMonth() === currentDay.getMonth()
+      const currentIndex = currentDay.getDay() as DayIndex;
+      const hours = useCustomWorkHours
+        ? customWorkHours[currentIndex] ?? { start: workStart, end: workEnd }
+        : { start: workStart, end: workEnd };
+      const dailyBusy = merged.filter(
+        (b) =>
+          b.start.getDate() === currentDay.getDate() &&
+          b.start.getMonth() === currentDay.getMonth()
       );
-      const dailyFree = invertBusyToFree(dailyBusy, currentDay, workStart, workEnd, minSlot);
-      weeklySlots.set(isoDate(currentDay), dailyFree);
+    const dailyFree = invertBusyToFree(dailyBusy, currentDay, hours.start, hours.end, minSlot);      weeklySlots.set(isoDate(currentDay), dailyFree);
     }
     return weeklySlots;
 
-  }, [busy, date, workStart, workEnd, minSlot, view]);
+  }, [
+    busy,
+    customWorkHours,
+    date,
+    minSlot,
+    useCustomWorkHours,
+    view,
+    workEnd,
+    workStart,
+  ]);
+
+    const formatTime = useCallback(
+    (value: Date) =>
+      value.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: displayTimezone || tz,
+      }),
+    [displayTimezone, tz]
+  );
+
+  const isConnected = googleConnected || !!msAccount;
+
+  const handleToday = useCallback(() => {
+    const today = new Date();
+    setDate(isoDate(today));
+  }, []);
+
 
   function handlePrev() {
     const currentDate = new Date(date);
@@ -506,6 +780,70 @@ export default function CalendarOverlayApp() {
     const increment = view === 'week' ? 7 : 1;
     currentDate.setDate(currentDate.getDate() + increment);
     setDate(isoDate(currentDate));
+  }
+
+  function handleCustomWorkHourChange(day: DayIndex, field: "start" | "end", value: string) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    const clamped = clampHour(parsed);
+    setCustomWorkHours((prev) => {
+      const next: WorkHoursMap = { ...prev };
+      next[day] = { ...prev[day], [field]: clamped } as WorkHours;
+      if (next[day].end < next[day].start) {
+        if (field === "start") {
+          next[day].end = clamped;
+        } else {
+          next[day].start = clamped;
+        }
+      }
+      return next;
+    });
+  }
+
+  function copyStandardHoursToCustom() {
+    setCustomWorkHours(createUniformWorkHours(workStart, workEnd));
+  }
+
+  function applySavedView(id: string) {
+    const viewToApply = savedViews.find((v) => v.id === id);
+    if (!viewToApply) return;
+    setSelectedViewId(id);
+    setDate(viewToApply.date);
+    setView(viewToApply.view);
+    setDetailsMode(viewToApply.detailsMode);
+    setMinSlot(viewToApply.minSlot);
+    setWorkStart(viewToApply.workStart);
+    setWorkEnd(viewToApply.workEnd);
+    setUseCustomWorkHours(viewToApply.useCustomWorkHours);
+    setCustomWorkHours(normalizeWorkHours(viewToApply.customWorkHours));
+  }
+
+  function handleDeleteSavedView() {
+    if (!selectedViewId) return;
+    setSavedViews((prev) => prev.filter((view) => view.id !== selectedViewId));
+    setSelectedViewId(null);
+  }
+
+  function handleSaveView() {
+    const trimmed = newViewName.trim();
+    if (!trimmed) return;
+    const snapshot: SavedView = {
+      id: `view-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: trimmed,
+      date,
+      view,
+      detailsMode,
+      minSlot,
+      workStart,
+      workEnd,
+      useCustomWorkHours,
+      customWorkHours: useCustomWorkHours
+        ? cloneWorkHours(customWorkHours)
+        : createUniformWorkHours(workStart, workEnd),
+    };
+    setSavedViews((prev) => [...prev, snapshot]);
+    setSelectedViewId(snapshot.id);
+    setNewViewName("");
   }
 
 return (
@@ -587,6 +925,12 @@ return (
             >
               &gt;
             </button>
+            <button
+              onClick={handleToday}
+              className="px-3 py-1 rounded-lg border bg-sky-50 text-sky-800 hover:bg-sky-100 dark:bg-sky-900/40 dark:hover:bg-sky-900/60 dark:text-sky-200 dark:border-sky-800 transition-colors text-sm"
+            >
+              I dag
+            </button>
           </div>
 
           <div className="flex items-center gap-2 ml-4">
@@ -608,26 +952,44 @@ return (
             </button>
           </div>
 
-          <label className="text-sm">
-            Arbeidstid:
-            <input
-              type="number"
-              min={0}
-              max={23}
-              value={workStart}
-              onChange={(e) => setWorkStart(parseInt(e.target.value || "8", 10))}
-              className="ml-2 w-16 border rounded px-2 py-1 bg-white dark:bg-gray-700 dark:border-gray-600"
-            />
-            <span className="mx-1">–</span>
-            <input
-              type="number"
-              min={0}
-              max={23}
-              value={workEnd}
-              onChange={(e) => setWorkEnd(parseInt(e.target.value || "17", 10))}
-              className="w-16 border rounded px-2 py-1 bg-white dark:bg-gray-700 dark:border-gray-600"
-            />
-          </label>
+         <div className="flex flex-wrap items-center gap-2 text-sm">
+            <label className="flex items-center">
+              Arbeidstid:
+              <input
+                type="number"
+                min={0}
+                max={23}
+                value={workStart}
+                onChange={(e) =>
+                  setWorkStart(parseInt(e.target.value || "8", 10))
+                }
+                className="ml-2 w-16 border rounded px-2 py-1 bg-white dark:bg-gray-700 dark:border-gray-600"
+              />
+              <span className="mx-1">–</span>
+              <input
+                type="number"
+                min={0}
+                max={23}
+                value={workEnd}
+                onChange={(e) => setWorkEnd(parseInt(e.target.value || "17", 10))}
+                className="w-16 border rounded px-2 py-1 bg-white dark:bg-gray-700 dark:border-gray-600"
+              />
+            </label>
+            <button
+              onClick={() => setUseCustomWorkHours((prev) => !prev)}
+              className="px-3 py-1 rounded-lg border bg-white dark:bg-gray-700 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+            >
+              {useCustomWorkHours ? "Samme tid alle dager" : "Tilpass per dag"}
+            </button>
+            {useCustomWorkHours && (
+              <button
+                onClick={copyStandardHoursToCustom}
+                className="px-3 py-1 rounded-lg border bg-white dark:bg-gray-700 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+              >
+                Kopier standard til alle
+              </button>
+            )}
+          </div>
 
           <label className="text-sm">
             Min. hull (min):
@@ -650,14 +1012,168 @@ return (
             />
             Vis detaljer (opt‑in)
           </label>
+          
+          <button
+            onClick={() => setShowTimezoneHelper((prev) => !prev)}
+            className="text-sm px-3 py-1 rounded-lg border bg-white dark:bg-gray-700 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+            aria-expanded={showTimezoneHelper}
+          >
+            {showTimezoneHelper ? "Skjul tidssonehjelper" : "Tidssonehjelper"}
+          </button>
+        </div>
+
+               {useCustomWorkHours && (
+          <div className="grid w-full gap-3 border-t pt-3 border-gray-200 dark:border-gray-700 sm:grid-cols-2 lg:grid-cols-3">
+            {DAY_ORDER.map((day) => (
+              <div
+                key={day}
+                className="rounded-xl border bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-700/40"
+              >
+                <div className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                  {DAY_LABELS[day]}
+                </div>
+                <div className="mt-2 flex items-center gap-2 text-sm">
+                  <label className="flex items-center gap-1">
+                    <span className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Start
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={customWorkHours[day].start}
+                      onChange={(e) =>
+                        handleCustomWorkHourChange(day, "start", e.target.value)
+                      }
+                      className="w-16 border rounded px-2 py-1 bg-white dark:bg-gray-800 dark:border-gray-600"
+                    />
+                  </label>
+                  <label className="flex items-center gap-1">
+                    <span className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Slutt
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={customWorkHours[day].end}
+                      onChange={(e) =>
+                        handleCustomWorkHourChange(day, "end", e.target.value)
+                      }
+                      className="w-16 border rounded px-2 py-1 bg-white dark:bg-gray-800 dark:border-gray-600"
+                    />
+                  </label>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex w-full flex-wrap items-center gap-2 border-t pt-3 border-gray-200 dark:border-gray-700">
+          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            Lagrede visninger
+          </span>
+          <select
+            value={selectedViewId ?? ""}
+            onChange={(e) => {
+              const id = e.target.value;
+              if (!id) {
+                setSelectedViewId(null);
+                return;
+              }
+              applySavedView(id);
+            }}
+            className="border rounded px-2 py-1 bg-white dark:bg-gray-700 dark:border-gray-600 text-sm"
+          >
+            <option value="">Velg …</option>
+            {savedViews.map((saved) => (
+              <option key={saved.id} value={saved.id}>
+                {saved.name}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={handleDeleteSavedView}
+            disabled={!selectedViewId}
+            className="px-3 py-1 rounded-lg border bg-white dark:bg-gray-700 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors disabled:opacity-50"
+          >
+            Slett valgt
+          </button>
+          <div className="flex flex-1 flex-wrap items-center gap-2 min-w-[220px]">
+            <input
+              type="text"
+              value={newViewName}
+              onChange={(e) => setNewViewName(e.target.value)}
+              placeholder="Navn på visning"
+              className="flex-1 min-w-[160px] border rounded px-2 py-1 bg-white dark:bg-gray-700 dark:border-gray-600 text-sm"
+            />
+            <button
+              onClick={handleSaveView}
+              disabled={!newViewName.trim()}
+              className="px-3 py-1 rounded-lg border bg-white dark:bg-gray-700 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors disabled:opacity-50"
+            >
+              Lagre nåværende
+            </button>
+          </div>
         </div>
 
         {err && <p className="text-sm text-red-500 dark:text-red-400">Feil: {err}</p>}
         {loading && <p className="text-sm text-gray-500 dark:text-gray-400">Laster …</p>}
 
+      {showTimezoneHelper && (
+          <div className="rounded-xl border bg-sky-50 dark:bg-sky-900/30 dark:border-sky-800/40 p-4 space-y-3 text-sm text-sky-900 dark:text-sky-100">
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2">
+                <span className="font-medium">Vis tider som:</span>
+                <select
+                  className="border rounded px-2 py-1 bg-white dark:bg-gray-700 dark:border-gray-600"
+                  value={displayTimezone || tz}
+                  onChange={(e) => setDisplayTimezone(e.target.value)}
+                >
+                  {[displayTimezone || tz, tz]
+                    .concat(timezones)
+                    .filter((zone, idx, arr) => zone && arr.indexOf(zone) === idx)
+                    .map((zone) => (
+                      <option key={zone} value={zone}>
+                        {zone}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <button
+                onClick={() => setDisplayTimezone(tz)}
+                className="px-3 py-1 rounded-lg border bg-white dark:bg-gray-700 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+              >
+                Bruk lokal tid ({tz})
+              </button>
+            </div>
+            <p>
+              Endre tidssonen midlertidig for å se hvordan møtene treffer kolleger i andre regioner. API-kallene bruker fortsatt din lokale tidssone.
+            </p>
+          </div>
+        )}
+
+        {!isConnected && (
+          <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 p-6 text-sm space-y-3 text-gray-700 dark:text-gray-300">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Kom i gang</h2>
+            <ol className="list-decimal list-inside space-y-1">
+              <li>Koble til Google-kalenderen din for å hente opptatt/ledig-områder.</li>
+              <li>Koble til Microsoft 365 om du også bruker Outlook.</li>
+              <li>Velg arbeidstid og ønsket minstelengde – appen foreslår ledige hull automatisk.</li>
+            </ol>
+            <p>
+              Du kan når som helst aktivere detaljer for å se møtetittel og sted. All behandling skjer lokalt i nettleseren.
+            </p>
+          </div>
+        )}
+
         <div className="grid md:grid-cols-3 gap-4">
           <div className="md:col-span-2">
             <h2 className="font-medium mb-2">Ledige hull</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+              Viser tider i {displayTimezone || tz}
+              {displayTimezone && displayTimezone !== tz ? ` (lokal tid: ${tz})` : ""}.
+            </p>
             {view === 'day' && (
               (freeSlots as Interval[]).length === 0 ? (
                 <p className="text-sm text-gray-500 dark:text-gray-400">Ingen ledige hull innenfor arbeidstid.</p>
@@ -666,8 +1182,7 @@ return (
                   {(freeSlots as Interval[]).map((s, i) => (
                     <li key={i} className="p-3 rounded-xl border bg-emerald-50 dark:bg-emerald-900/50 dark:border-emerald-800/50">
                       <div className="text-sm">
-                        {s.start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} –{" "}
-                        {s.end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        {formatTime(s.start)} – {formatTime(s.end)}
                       </div>
                       <div className="text-xs text-gray-600 dark:text-gray-400">
                         {(s.end.getTime() - s.start.getTime()) / 60000} min
@@ -692,8 +1207,7 @@ return (
                         {slots.map((s, i) => (
                            <li key={i} className="p-3 rounded-xl border bg-emerald-50 dark:bg-emerald-900/50 dark:border-emerald-800/50">
                             <div className="text-sm">
-                              {s.start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} –{" "}
-                              {s.end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                              {formatTime(s.start)} – {formatTime(s.end)}
                             </div>
                             <div className="text-xs text-gray-600 dark:text-gray-400">
                               {(s.end.getTime() - s.start.getTime()) / 60000} min
@@ -714,12 +1228,47 @@ return (
             </h2>
 
             {!detailsMode ? (
-              <ul className="text-sm text-gray-700 dark:text-gray-400 space-y-1">
-                <li>Google: free/busy</li>
-                <li>Microsoft: calendarView</li>
-                <li>Tidssone: {tz}</li>
-                <li>Ingen logger, ingen backend</li>
-              </ul>
+              <div className="space-y-4 text-sm text-gray-700 dark:text-gray-400">
+                <ul className="space-y-2">
+                  {([
+                    { key: "google" as Source, label: "Google" },
+                    { key: "microsoft" as Source, label: "Microsoft" },
+                  ] as const).map(({ key, label }) => (
+                    <li key={key} className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="inline-flex h-3 w-3 rounded-full"
+                          style={{ backgroundColor: sourceColors[key] }}
+                          aria-hidden
+                        />
+                        <span>
+                          {label}: free/busy
+                        </span>
+                      </div>
+                      <label className="inline-flex items-center gap-2">
+                        <span className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Farge</span>
+                        <input
+                          type="color"
+                          value={sourceColors[key]}
+                          onChange={(e) =>
+                            setSourceColors((prev) => ({
+                              ...prev,
+                              [key]: e.target.value,
+                            }))
+                          }
+                          className="h-8 w-8 border rounded cursor-pointer"
+                          aria-label={`${label}-farge`}
+                        />
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+                <ul className="space-y-1">
+                  <li>API-kilder: Google freeBusy & Microsoft calendarView</li>
+                  <li>Standard tidssone: {tz}</li>
+                  <li>Ingen logger, ingen backend</li>
+                </ul>
+              </div>              
             ) : events.length === 0 ? (
               <p className="text-sm text-gray-500 dark:text-gray-400">
                 Ingen hendelser å vise, eller ikke tilkoblet.
@@ -727,17 +1276,22 @@ return (
             ) : (
               <ul className="space-y-2">
                 {events.map((e, i) => {
-                  const range = `${e.start.toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })} – ${e.end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+                  const range = `${formatTime(e.start)} – ${formatTime(e.end)}`;
                   return (
-                    <li key={i} className="p-3 rounded-xl border bg-gray-50 dark:bg-gray-700 dark:border-gray-600">
-                      <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                        {e.source === "google" ? "Google" : "Microsoft"}
+                    <li
+                      key={i}
+                      className="p-3 rounded-xl border bg-white dark:bg-gray-700 dark:border-gray-600"
+                      style={{
+                        borderLeft: `4px solid ${sourceColors[e.source]}`,
+                        boxShadow: `inset 4px 0 0 ${sourceColors[e.source]}20`,
+                      }}
+                    >
+                      <div className="flex items-center justify-between text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        <span>{e.source === "google" ? "Google" : "Microsoft"}</span>
+                        <span style={{ color: sourceColors[e.source] }}>{displayTimezone || tz}</span>
                       </div>
                       <div className="font-medium">{e.title ?? "(Privat)"}</div>
-                      <div className="text-sm text-gray-600 dark:text-gray-400">
+                      <div className="text-sm text-gray-600 dark:text-gray-300">
                         {range}
                         {e.location ? ` · ${e.location}` : ""}
                       </div>
