@@ -36,6 +36,20 @@ type EventItem = {
   isPrivate?: boolean;
 };
 
+type GoogleEvent = {
+  start?: { date?: string; dateTime?: string };
+  end?: { date?: string; dateTime?: string };
+  visibility?: string;
+  transparency?: string;
+  location?: string;
+  summary?: string;
+};
+
+type GoogleEventsResponse = {
+  items?: GoogleEvent[];
+  nextPageToken?: string;
+};
+
 const DAY_INDICES = [0, 1, 2, 3, 4, 5, 6] as const;
 type DayIndex = (typeof DAY_INDICES)[number];
 
@@ -627,9 +641,11 @@ export default function CalendarOverlayApp() {
     const items: EventItem[] = [];
     let pageToken: string | null = null;
     while (true) {
-      const url =
+      const requestUrl: string =
         baseUrl + (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "");
-      const resp = await fetch(url, {
+      const resp = await fetch(requestUrl, {
+
+      main
         headers: { Authorization: `Bearer ${googleTokenRef.current}` },
       });
       if (resp.status === 429 || resp.status === 503) {
@@ -637,7 +653,7 @@ export default function CalendarOverlayApp() {
         continue;
       }
       if (!resp.ok) throw new Error(`Google details: ${resp.status}`);
-      const data = await resp.json();
+      const data: GoogleEventsResponse = await resp.json();
       for (const e of data.items || []) {
         const isPriv = e.visibility === "private";
         const start = e.start?.dateTime
