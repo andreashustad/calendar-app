@@ -153,7 +153,11 @@ export default function CalendarOverlayApp() {
   const [selectedViewId, setSelectedViewId] = useState<string | null>(null);
   const [newViewName, setNewViewName] = useState("");
 
-  const weekNumber = useMemo(() => getISOWeek(new Date(date)), [date]);
+  const weekNumber = useMemo(
+    () => getISOWeek(new Date(`${date}T00:00:00`)),
+    [date]
+  );
+
 
   // Auth state
   const tz = useMemo(localTZ, []);
@@ -717,7 +721,7 @@ export default function CalendarOverlayApp() {
     
     // For week view
     const weeklySlots = new Map<string, Interval[]>();
-    const startOfWeek = new Date(date);
+    const startOfWeek = new Date(`${date}T00:00:00`);
     const dayOfWeek = startOfWeek.getDay();
     const diff = startOfWeek.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
     startOfWeek.setDate(diff);
@@ -734,7 +738,14 @@ export default function CalendarOverlayApp() {
           b.start.getDate() === currentDay.getDate() &&
           b.start.getMonth() === currentDay.getMonth()
       );
-    const dailyFree = invertBusyToFree(dailyBusy, currentDay, hours.start, hours.end, minSlot);      weeklySlots.set(isoDate(currentDay), dailyFree);
+      const dailyFree = invertBusyToFree(
+        dailyBusy,
+        currentDay,
+        hours.start,
+        hours.end,
+        minSlot
+      );
+      weeklySlots.set(isoDate(currentDay), dailyFree);
     }
     return weeklySlots;
 
@@ -768,14 +779,14 @@ export default function CalendarOverlayApp() {
 
 
   function handlePrev() {
-    const currentDate = new Date(date);
+    const currentDate = new Date(`${date}T00:00:00`);
     const increment = view === 'week' ? 7 : 1;
     currentDate.setDate(currentDate.getDate() - increment);
     setDate(isoDate(currentDate));
   }
 
   function handleNext() {
-    const currentDate = new Date(date);
+    const currentDate = new Date(`${date}T00:00:00`);
     const increment = view === 'week' ? 7 : 1;
     currentDate.setDate(currentDate.getDate() + increment);
     setDate(isoDate(currentDate));
@@ -1197,7 +1208,11 @@ return (
                 {Array.from((freeSlots as Map<string, Interval[]>).entries()).map(([dayStr, slots]) => (
                   <div key={dayStr}>
                     <h3 className="font-medium text-sm text-gray-800 dark:text-gray-300 mb-1 border-b pb-1 dark:border-gray-700">
-                      {new Date(dayStr).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}
+                        {new Date(`${dayStr}T00:00:00`).toLocaleDateString([], {
+                        weekday: "long",
+                        month: "long",
+                        day: "numeric",
+                      })}
                     </h3>
                     {slots.length === 0 ? (
                       <p className="text-sm text-gray-500 dark:text-gray-400 px-3 py-2">Ingen ledige hull.</p>
