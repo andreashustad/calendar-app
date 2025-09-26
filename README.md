@@ -38,11 +38,12 @@
 
 ## Personvern/sikkerhet
 - Ingen server, ingen logging. Tokens lagres ikke i LocalStorage.
-- `Content-Security-Policy` begrenser skript og nettverkskall til Google/Microsoft.
+- `Content-Security-Policy` begrenser skript og nettverkskall til Google/Microsoft (inkludert `oauth2.googleapis.com` for token-revoke).
 - HTML for `/kalender` har `Cache-Control: no-store`.
 - “Panic”-knapp opphever tokens og tømmer session.
 
 ## Verifisering (for revisjon)
-- DevTools → Network: Bare `accounts.google.com`, `www.googleapis.com`, `login.microsoftonline.com`, `graph.microsoft.com`.
+- DevTools → Network: Bare `accounts.google.com`, `www.googleapis.com`, `oauth2.googleapis.com`, `login.microsoftonline.com`, `graph.microsoft.com`.
 - Ingen requests til ditt domene etter initial sideinnlasting.
 - Test i inkognito/ren profil (extensions av).
+- Trigger "Panic"-knappen og bekreft i DevTools at revoke-kallet mot `https://oauth2.googleapis.com` fullfører (enkelt røyk/smoke-sjekk for CSP-regresjoner).

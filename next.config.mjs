@@ -23,7 +23,7 @@ const nextConfig = {
       // Keep 'unsafe-inline' only if your current Next build requires it.
       // Try removing it once everything is stable.
       "script-src 'self' https://accounts.google.com 'unsafe-inline'",
-      "connect-src 'self' https://www.googleapis.com https://graph.microsoft.com https://login.microsoftonline.com https://accounts.google.com",
+      "connect-src 'self' https://www.googleapis.com https://graph.microsoft.com https://login.microsoftonline.com https://accounts.google.com https://oauth2.googleapis.com",
       "img-src 'self' data:",
       "style-src 'self' 'unsafe-inline'",
       "frame-src https://accounts.google.com https://login.microsoftonline.com",

@@ -453,12 +453,11 @@ export default function CalendarOverlayApp() {
       setMsAccount(null);
       if (googleTokenRef.current) {
         try {
-          await fetch(
-            `https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(
-              googleTokenRef.current
-            )}`,
-            { method: "POST" }
-          );
+          await fetch("https://oauth2.googleapis.com/revoke", {
+            method: "POST",
+            body: new URLSearchParams({ token: googleTokenRef.current }).toString(),
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          });
         } catch {}
       }
       googleTokenRef.current = null;
