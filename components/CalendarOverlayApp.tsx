@@ -36,6 +36,20 @@ type EventItem = {
   isPrivate?: boolean;
 };
 
+type GoogleEvent = {
+  start?: { date?: string; dateTime?: string };
+  end?: { date?: string; dateTime?: string };
+  visibility?: string;
+  transparency?: string;
+  location?: string;
+  summary?: string;
+};
+
+type GoogleEventsResponse = {
+  items?: GoogleEvent[];
+  nextPageToken?: string;
+};
+
 const DAY_INDICES = [0, 1, 2, 3, 4, 5, 6] as const;
 type DayIndex = (typeof DAY_INDICES)[number];
 
@@ -577,10 +591,9 @@ export default function CalendarOverlayApp() {
 
   // ---- Details (opt-in) ----
 
-  async function fetchGraphDetails(day: string): Promise<EventItem[]> {
+  async function fetchGraphDetails(startISO: string, endISO: string): Promise<EventItem[]> {
     const token = await getMsToken();
     if (!token) return [];
-    const { startISO, endISO } = dayBoundsISO(day);
     let url =
       "https://graph.microsoft.com/v1.0/me/calendarView" +
       `?startDateTime=${encodeURIComponent(startISO)}` +
@@ -615,10 +628,9 @@ export default function CalendarOverlayApp() {
     return items.filter((x) => x.end > x.start);
   }
 
-  async function fetchGoogleDetails(day: string): Promise<EventItem[]> {
+  async function fetchGoogleDetails(startISO: string, endISO: string): Promise<EventItem[]> {
     if (!googleTokenRef.current) return [];
-    const { startISO, endISO } = dayBoundsISO(day);
-    let url =
+    const baseUrl =
       "https://www.googleapis.com/calendar/v3/calendars/primary/events" +
       `?singleEvents=true&orderBy=startTime` +
       `&timeMin=${encodeURIComponent(startISO)}` +
@@ -627,8 +639,11 @@ export default function CalendarOverlayApp() {
       `&fields=items(start,end,visibility,transparency,location,summary),nextPageToken`;
 
     const items: EventItem[] = [];
+    let pageToken: string | null = null;
     while (true) {
-      const resp = await fetch(url, {
+      const requestUrl: string =
+        baseUrl + (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "");
+      const resp = await fetch(requestUrl, {
         headers: { Authorization: `Bearer ${googleTokenRef.current}` },
       });
       if (resp.status === 429 || resp.status === 503) {
@@ -636,7 +651,7 @@ export default function CalendarOverlayApp() {
         continue;
       }
       if (!resp.ok) throw new Error(`Google details: ${resp.status}`);
-      const data = await resp.json();
+      const data: GoogleEventsResponse = await resp.json();
       for (const e of data.items || []) {
         const isPriv = e.visibility === "private";
         const start = e.start?.dateTime
@@ -654,8 +669,8 @@ export default function CalendarOverlayApp() {
           isPrivate: isPriv,
         });
       }
-      if (!data.nextPageToken) break;
-      url += `&pageToken=${data.nextPageToken}`;
+      pageToken = data.nextPageToken ?? null;
+      if (!pageToken) break;
     }
     return items.filter((x) => x.end > x.start);
   }
@@ -665,7 +680,7 @@ export default function CalendarOverlayApp() {
     setLoading(true);
     setErr(null);
     try {
-      const { startISO, endISO } = view === 'day' ? dayBoundsISO(date) : weekBoundsISO(date);
+      const { startISO, endISO } = view === "day" ? dayBoundsISO(date) : weekBoundsISO(date);
 
       const tasks: Promise<any>[] = [fetchGraphFreeBusy(startISO, endISO), fetchGoogleFreeBusy(startISO, endISO)];
       const [msBusy, gBusy] = await Promise.all(tasks);
@@ -685,7 +700,7 @@ export default function CalendarOverlayApp() {
       setBusy(busyBlocks);
 
       if (detailsMode) {
-        const detTasks: Promise<any>[] = [fetchGraphDetails(date), fetchGoogleDetails(date)];
+        const detTasks: Promise<any>[] = [fetchGraphDetails(startISO, endISO), fetchGoogleDetails(startISO, endISO)];
         const [msDet, gDet] = await Promise.all(detTasks);
         setEvents([...msDet, ...gDet].sort((a, b) => a.start.getTime() - b.start.getTime()));
       } else {
