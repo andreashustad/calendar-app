@@ -733,13 +733,9 @@ export default function CalendarOverlayApp() {
       const hours = useCustomWorkHours
         ? customWorkHours[currentIndex] ?? { start: workStart, end: workEnd }
         : { start: workStart, end: workEnd };
-      const dailyBusy = merged.filter(
-        (b) =>
-          b.start.getDate() === currentDay.getDate() &&
-          b.start.getMonth() === currentDay.getMonth()
-      );
+
       const dailyFree = invertBusyToFree(
-        dailyBusy,
+        merged,
         currentDay,
         hours.start,
         hours.end,
