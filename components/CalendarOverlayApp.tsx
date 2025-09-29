@@ -644,8 +644,6 @@ export default function CalendarOverlayApp() {
       const requestUrl: string =
         baseUrl + (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "");
       const resp = await fetch(requestUrl, {
-
-      main
         headers: { Authorization: `Bearer ${googleTokenRef.current}` },
       });
       if (resp.status === 429 || resp.status === 503) {
